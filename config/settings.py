@@ -10,6 +10,10 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
 GITHUB_SECRET_NAME = "agentscope/github-token"
 
+# Telegram
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_USER_ID   = int(os.getenv("TELEGRAM_USER_ID", "0"))
+
 # Models
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "claude-sonnet-4-6")
 FAST_MODEL    = os.getenv("FAST_MODEL",    "claude-haiku-4-5")
