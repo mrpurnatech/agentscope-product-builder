@@ -1,8 +1,3 @@
-nano requirements.txt
-```
-
-Paste:
-```
 anthropic>=0.49.0
 agentscope>=0.1.0
 boto3>=1.42.0
