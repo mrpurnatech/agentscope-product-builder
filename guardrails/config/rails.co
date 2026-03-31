@@ -1,0 +1,48 @@
+# ── INPUT RAILS ──────────────────────────────────────────
+
+define flow check prompt injection
+  user message contains injection pattern
+  bot refuse injection
+
+define bot refuse injection
+  "I detected a prompt injection attempt in your input.
+   Please provide a genuine product requirement."
+
+define flow check off topic
+  user message is not about building a software product
+  bot refuse off topic
+
+define bot refuse off topic
+  "I can only help build software products.
+   Please describe a software product you want to create."
+
+define flow check malicious content
+  user message contains malicious intent
+  bot refuse malicious
+
+define bot refuse malicious
+  "Your request contains content that cannot be processed.
+   Please provide a legitimate product requirement."
+
+# ── OUTPUT RAILS ─────────────────────────────────────────
+
+define flow check sensitive data
+  bot message contains sensitive data
+  bot remove sensitive data
+
+define bot remove sensitive data
+  "Output contained sensitive data and was blocked for security."
+
+define flow check malicious repo name
+  bot message contains malicious repo name
+  bot sanitize repo name
+
+define bot sanitize repo name
+  "Repo name was sanitized for security compliance."
+
+define flow check hardcoded secrets
+  bot message contains hardcoded secret
+  bot remove secret
+
+define bot remove secret
+  "Hardcoded secret detected and removed from output."

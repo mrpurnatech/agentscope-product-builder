@@ -6,12 +6,13 @@ from agents import (
     qa_agent,
     github_agent
 )
+from guardrails.guardrails_check import guard_input, guard_output
 
 
 class ProductBuilderOrchestrator:
     """
-    Coordinates all agents to build a complete product.
-    Flow: Planner → Coder → Reviewer → QA → GitHub
+    Coordinates all agents with NeMo Guardrails security.
+    Flow: Guard Input → Planner → Coder → Reviewer → QA → Guard Output → GitHub
     """
 
     def build(self, requirement: str) -> str:
@@ -20,10 +21,18 @@ class ProductBuilderOrchestrator:
         print("="*60)
         print(f"Building: {requirement}\n")
 
-        # Step 1 — Plan
+        # ── NeMo Input Guard ─────────────────────────────
+        is_safe, reason = guard_input(requirement)
+        if not is_safe:
+            print(f"\n❌ Build blocked by security guardrail:")
+            print(f"   Reason: {reason}")
+            print("\nPlease provide a legitimate product requirement.")
+            return None
+
+        # ── Step 1: Plan ─────────────────────────────────
         plan = planner_agent.run(requirement)
 
-        # Step 2 — Code + Review + QA per file
+        # ── Step 2: Code + Review + QA ───────────────────
         files = {}
         test_files = {}
         scores = []
@@ -51,20 +60,26 @@ class ProductBuilderOrchestrator:
             )
             if test_code:
                 ext = "py" if plan["stack"] == "python" else "js"
-                base = file_info["path"].replace("/", "_").replace(".", "_")
+                base = file_info["path"].replace("/","_").replace(".","_")
                 test_files[f"tests/test_{base}.{ext}"] = test_code
 
         files.update(test_files)
 
-        # Step 3 — Push
-        url = github_agent.run(plan, files)
+        # ── NeMo Output Guard ────────────────────────────
+        is_safe, clean_files = guard_output(plan, files)
+        if not is_safe:
+            print(f"\n❌ Output blocked by security guardrail")
+            return None
 
-        # Summary
+        # ── Step 3: Push to GitHub ────────────────────────
+        url = github_agent.run(plan, clean_files)
+
+        # ── Summary ──────────────────────────────────────
         avg = sum(scores) / len(scores) if scores else 0
         print("\n" + "="*60)
         print("BUILD COMPLETE!")
         print(f"Repo:        {url}")
-        print(f"Files:       {len(files)}")
+        print(f"Files:       {len(clean_files)}")
         print(f"Tests:       {len(test_files)}")
         print(f"Avg quality: {avg:.0f}/100")
         print("="*60 + "\n")
