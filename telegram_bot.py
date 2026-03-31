@@ -25,8 +25,9 @@ def get_secret(name: str) -> str:
         SecretId=name
     )["SecretString"]
 
-TELEGRAM_TOKEN   = get_secret("agentscope/telegram-token")
-ALLOWED_USER_ID  = int(get_secret("agentscope/telegram-userid"))
+from config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_USER_ID
+TELEGRAM_TOKEN  = TELEGRAM_BOT_TOKEN
+ALLOWED_USER_ID = TELEGRAM_USER_ID
 
 # ── Build state tracking ──────────────────────────────────
 build_state = {
