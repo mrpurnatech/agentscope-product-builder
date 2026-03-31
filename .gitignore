@@ -1,0 +1,34 @@
+nano .gitignore
+```
+
+Paste:
+```
+# Environment
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+*.egg-info/
+
+# Logs
+logs/*.log
+*.log
+
+# AWS
+.aws/
+
+# VS Code
+.vscode/
+
+# Mac
+.DS_Store
+
+# Secrets
+*.pem
+secrets.json
+.env
