@@ -30,7 +30,7 @@ Purpose: {file_info['purpose']}"""
 
     return ask(
         prompt=prompt,
-        model=DEFAULT_MODEL,
+         task_type="code",
         system=system,
         max_tokens=MAX_TOKENS_CODE
     )

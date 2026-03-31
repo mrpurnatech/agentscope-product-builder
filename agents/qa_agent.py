@@ -29,7 +29,7 @@ Source code:
 
     return ask(
         prompt=prompt,
-        model=FAST_MODEL,
+        task_type="qa",
         system=system,
         max_tokens=MAX_TOKENS_QA
     )

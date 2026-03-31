@@ -25,7 +25,7 @@ File: {file_path}
 
     raw = ask(
         prompt=prompt,
-        model=FAST_MODEL,
+        task_type="review",
         system=SYSTEM,
         max_tokens=MAX_TOKENS_REVIEW
     )

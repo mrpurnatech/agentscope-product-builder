@@ -25,7 +25,7 @@ def run(requirement: str) -> dict:
     print(f"\n[PlannerAgent] Planning: {requirement[:60]}...")
     raw = ask(
         prompt=f"Product requirement: {requirement}",
-        model=DEFAULT_MODEL,
+        task_type="plan",
         system=SYSTEM,
         max_tokens=MAX_TOKENS_PLAN
     )

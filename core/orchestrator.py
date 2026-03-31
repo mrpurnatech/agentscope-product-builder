@@ -7,7 +7,7 @@ from agents import (
     github_agent
 )
 from guardrails.guardrails_check import guard_input, guard_output
-
+from core.gateway import gateway
 
 class ProductBuilderOrchestrator:
     """
@@ -76,11 +76,15 @@ class ProductBuilderOrchestrator:
 
         # ── Summary ──────────────────────────────────────
         avg = sum(scores) / len(scores) if scores else 0
+        usage = gateway.summary()  # ADD THIS LINE
         print("\n" + "="*60)
         print("BUILD COMPLETE!")
         print(f"Repo:        {url}")
         print(f"Files:       {len(clean_files)}")
         print(f"Tests:       {len(test_files)}")
         print(f"Avg quality: {avg:.0f}/100")
+        print(f"API calls:   {usage['total_calls']}")      # ADD
+        print(f"Tokens used: {usage['total_tokens']:,}")   # ADD
+        print(f"Total cost:  {usage['total_cost']}")   
         print("="*60 + "\n")
         return url
