@@ -1,7 +1,10 @@
-from core.llm_client import ask, parse_json
-from config.settings import FAST_MODEL, MAX_TOKENS_REVIEW
+"""Reviewer Agent — code review + scoring using Haiku."""
+from agentscope.message import Msg
+from agents.base import ProductAgent
+from core.models import create_fast_model
+from config.settings import MAX_TOKENS_REVIEW
 
-SYSTEM = """You are a senior code reviewer.
+SYS_PROMPT = """You are a senior code reviewer.
 Review for: security issues, syntax errors, missing error handling,
 hardcoded secrets, SQL injection, production readiness.
 Respond ONLY with raw JSON:
@@ -15,22 +18,30 @@ Approve with score for minor issues.
 Only set approved false and provide fixed_code for critical issues."""
 
 
-def run(file_path: str, code: str, plan: dict) -> dict:
-    print(f"  [ReviewerAgent] Reviewing {file_path}...")
+class ReviewerAgent(ProductAgent):
+    """Reviews generated code and scores quality."""
 
-    prompt = f"""Stack: {plan['stack']}/{plan['framework']}
+    def __init__(self) -> None:
+        super().__init__(
+            name="reviewer",
+            model=create_fast_model(max_tokens=MAX_TOKENS_REVIEW),
+            sys_prompt=SYS_PROMPT,
+        )
+
+    async def review(self, file_path: str, code: str, plan: dict) -> dict:
+        """Review a single file. Returns review dict."""
+        print(f"    [reviewer] Reviewing {file_path}...")
+
+        prompt = f"""Stack: {plan.get('stack', 'python')}/{plan.get('framework', 'fastapi')}
 File: {file_path}
 
 {code}"""
 
-    raw = ask(
-        prompt=prompt,
-        task_type="review",
-        system=SYSTEM,
-        max_tokens=MAX_TOKENS_REVIEW
-    )
+        try:
+            return await self.call_llm_json(prompt)
+        except Exception:
+            return {"approved": True, "score": 70, "issues": [], "fixed_code": None}
 
-    try:
-        return parse_json(raw)
-    except Exception:
-        return {"approved": True, "score": 70, "issues": [], "fixed_code": None}
+    async def reply(self, msg: Msg | None = None) -> Msg:
+        ctx = self.get_build_context(msg)
+        return self.make_reply("Reviewer ready", ctx)

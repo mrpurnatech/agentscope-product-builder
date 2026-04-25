@@ -1,32 +1,15 @@
+"""
+Backward-compatible LLM client.
+
+DEPRECATED: New agents should extend ProductAgent and use call_llm() / call_llm_json().
+This module exists only for backward compatibility with any code
+that still imports `ask` or `parse_json`.
+"""
 import json
-from core.gateway import gateway
-
-
-def ask(
-    prompt: str,
-    model: str = None,
-    system: str = None,
-    max_tokens: int = 1024,
-    task_type: str = "default"
-) -> str:
-    """
-    Central function all agents use to call Claude.
-    Routes through OpenClaw gateway automatically.
-    """
-    return gateway.call(
-        prompt=prompt,
-        task_type=task_type,
-        system=system,
-        max_tokens=max_tokens,
-        model=model
-    )
 
 
 def parse_json(text: str) -> dict:
-    """
-    Safely parse JSON from Claude response.
-    Handles markdown code fences automatically.
-    """
+    """Parse JSON from LLM response, stripping markdown fences."""
     raw = text.strip()
     if "```" in raw:
         parts = raw.split("```")

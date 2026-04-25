@@ -14,16 +14,18 @@ GITHUB_SECRET_NAME = "agentscope/github-token"
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_USER_ID   = int(os.getenv("TELEGRAM_USER_ID", "0"))
 
-# Models
+# Models (Anthropic)
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "claude-sonnet-4-6")
 FAST_MODEL    = os.getenv("FAST_MODEL",    "claude-haiku-4-5")
 SMART_MODEL   = os.getenv("SMART_MODEL",   "claude-opus-4-6")
 
-# Limits
-MAX_TOKENS_PLAN   = 4096
-MAX_TOKENS_CODE   = 4096
-MAX_TOKENS_REVIEW = 2048
-MAX_TOKENS_QA     = 2048
+# Token Limits — tuned per agent role
+MAX_TOKENS_ARCHITECT = 8192    # PRD parser + architect (large structured output)
+MAX_TOKENS_PLAN      = 4096    # Service-level planning
+MAX_TOKENS_CODE      = 8192    # Code generation (full file content)
+MAX_TOKENS_REVIEW    = 2048    # Code review (short feedback)
+MAX_TOKENS_QA        = 4096    # Test generation
+MAX_TOKENS_DOCS      = 8192    # Documentation generation
 
 # Logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

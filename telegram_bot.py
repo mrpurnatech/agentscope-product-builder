@@ -1,5 +1,4 @@
 import asyncio
-import threading
 import boto3
 from datetime import datetime
 from telegram import Update
@@ -10,49 +9,54 @@ from telegram.ext import (
     filters,
     ContextTypes
 )
+import agentscope
 from core.orchestrator import ProductBuilderOrchestrator
-from core.gateway import gateway
+from core.cost_tracker import cost_tracker
 from github import Github
 from config.settings import AWS_REGION
+
 
 # ── Load secrets ─────────────────────────────────────────
 def get_secret(name: str) -> str:
     client = boto3.client(
         service_name="secretsmanager",
-        region_name=AWS_REGION
+        region_name=AWS_REGION,
     )
-    return client.get_secret_value(
-        SecretId=name
-    )["SecretString"]
+    return client.get_secret_value(SecretId=name)["SecretString"]
+
 
 from config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_USER_ID
-TELEGRAM_TOKEN  = TELEGRAM_BOT_TOKEN
+TELEGRAM_TOKEN = TELEGRAM_BOT_TOKEN
 ALLOWED_USER_ID = TELEGRAM_USER_ID
 
 # ── Build state tracking ──────────────────────────────────
 build_state = {
     "running": False,
     "current": None,
+    "phase": None,
     "history": [],
-    "cancelled": False
+    "cancelled": False,
 }
 
-# ── Auth check ────────────────────────────────────────────
+
 def is_authorized(update: Update) -> bool:
     return update.effective_user.id == ALLOWED_USER_ID
 
-def unauthorized_msg() -> str:
-    return "⛔ Unauthorized. This is a private bot."
 
 # ── /start command ────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
-        await update.message.reply_text(unauthorized_msg())
+        await update.message.reply_text("Unauthorized. This is a private bot.")
         return
 
     await update.message.reply_text(
-        "👋 *AgentScope Product Builder*\n\n"
-        "I build complete production codebases from your requirements.\n\n"
+        "*AgentScope Product Builder*\n\n"
+        "Multi-agent system that builds complete multi-service "
+        "codebases from your PRD.\n\n"
+        "*Agents:*\n"
+        "PRD Parser (Opus) | Architect (Opus) | Database\n"
+        "API Designer | Planner | Coder | Reviewer | QA\n"
+        "Frontend | Integration | DevOps | Docs | GitHub\n\n"
         "*Commands:*\n"
         "/build — Start a new product build\n"
         "/status — Check current build status\n"
@@ -60,257 +64,210 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/cost — Get API cost summary\n"
         "/cancel — Cancel running build\n"
         "/help — Show this message",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
     )
 
-# ── /help command ─────────────────────────────────────────
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
+
 
 # ── /build command ────────────────────────────────────────
 async def build_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
-        await update.message.reply_text(unauthorized_msg())
+        await update.message.reply_text("Unauthorized.")
         return
 
     if build_state["running"]:
         await update.message.reply_text(
-            "⚠️ A build is already running.\n"
-            f"Building: *{build_state['current']}*\n\n"
-            "Use /cancel to stop it or /status to check progress.",
-            parse_mode="Markdown"
+            f"A build is already running.\n"
+            f"Building: *{build_state['current'][:60]}...*\n\n"
+            f"Use /cancel to stop or /status to check.",
+            parse_mode="Markdown",
         )
         return
 
     await update.message.reply_text(
-        "💬 What do you want to build?\n\n"
-        "Just describe your product in plain English.\n"
-        "Example: _A SaaS app for tracking invoices with Stripe payments_",
-        parse_mode="Markdown"
+        "Describe your product (PRD).\n\n"
+        "You can send a one-liner or a detailed spec.\n"
+        "The more detail, the better the output.",
+        parse_mode="Markdown",
     )
     context.user_data["waiting_for_requirement"] = True
 
-# ── Handle free text (product requirement) ────────────────
+
+# ── Handle text (PRD) ────────────────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
-        await update.message.reply_text(unauthorized_msg())
+        await update.message.reply_text("Unauthorized.")
         return
 
     if not context.user_data.get("waiting_for_requirement"):
-        await update.message.reply_text(
-            "Use /build to start a new build or /help for commands."
-        )
+        await update.message.reply_text("Use /build to start or /help for commands.")
         return
 
     context.user_data["waiting_for_requirement"] = False
-    requirement = update.message.text.strip()
+    prd = update.message.text.strip()
 
-    if len(requirement) < 10:
-        await update.message.reply_text(
-            "⚠️ Please describe your product in more detail."
-        )
+    if len(prd) < 10:
+        await update.message.reply_text("Please provide more detail (at least 10 chars).")
         return
 
-    # Start build in background thread
     await update.message.reply_text(
-        f"🚀 *Starting build...*\n\n"
-        f"📋 Requirement:\n_{requirement}_\n\n"
-        f"⏳ This takes 3-8 minutes depending on project size.\n"
-        f"I'll message you when it's done!",
-        parse_mode="Markdown"
+        f"*Starting multi-agent build...*\n\n"
+        f"PRD: {prd[:200]}{'...' if len(prd) > 200 else ''}\n\n"
+        f"13 agents will work through 9 phases.\n"
+        f"This takes 5-15 minutes. I'll notify you when done!",
+        parse_mode="Markdown",
     )
 
-    # Run build in background so bot stays responsive
-    thread = threading.Thread(
-        target=run_build_sync,
-        args=(requirement, update.effective_chat.id, context.application)
+    # Run build as async task (no threading needed)
+    asyncio.create_task(
+        run_build(prd, update.effective_chat.id, context.application)
     )
-    thread.daemon = True
-    thread.start()
 
-# ── Run build in background thread ───────────────────────
-def run_build_sync(requirement: str, chat_id: int, app):
-    build_state["running"]   = True
-    build_state["current"]   = requirement
+
+# ── Async build runner ────────────────────────────────────
+async def run_build(prd: str, chat_id: int, app):
+    build_state["running"] = True
+    build_state["current"] = prd
     build_state["cancelled"] = False
 
     start_time = datetime.now()
 
     try:
         orchestrator = ProductBuilderOrchestrator()
-        url = orchestrator.build(requirement)
+        url = await orchestrator.build(prd)
 
         elapsed = (datetime.now() - start_time).seconds
-        usage   = gateway.summary()
+        usage = cost_tracker.summary()
+        minutes, seconds = divmod(elapsed, 60)
 
         if build_state["cancelled"]:
-            message = "🚫 Build was cancelled."
+            message = "Build was cancelled."
         elif url:
             message = (
-                f"✅ *Build Complete!*\n\n"
-                f"📦 Repo: {url}\n"
-                f"⏱ Time: {elapsed}s\n"
-                f"📊 API calls: {usage['total_calls']}\n"
-                f"🔢 Tokens: {usage['total_tokens']:,}\n"
-                f"💰 Cost: {usage['total_cost']}\n\n"
-                f"Your codebase is ready on GitHub!"
+                f"*Build Complete!*\n\n"
+                f"Repo: {url}\n"
+                f"Time: {minutes}m {seconds}s\n"
+                f"API calls: {usage['total_calls']}\n"
+                f"Tokens: {usage['total_tokens']:,}\n"
+                f"Cost: {usage['total_cost']}\n\n"
+                f"Multi-service codebase is ready!"
             )
-
-            # Save to history
             build_state["history"].append({
-                "requirement": requirement,
+                "prd": prd[:100],
                 "url": url,
                 "cost": usage["total_cost"],
                 "time": elapsed,
-                "date": datetime.now().strftime("%Y-%m-%d %H:%M")
+                "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
             })
         else:
-            message = (
-                "❌ *Build blocked by security guardrails.*\n\n"
-                "Your requirement was flagged as potentially unsafe.\n"
-                "Please provide a legitimate product requirement."
-            )
+            message = "*Build blocked by security guardrails.*"
 
     except Exception as e:
-        message = (
-            f"❌ *Build failed*\n\n"
-            f"Error: {str(e)[:200]}\n\n"
-            f"Please try again or check /status"
-        )
+        message = f"*Build failed*\n\nError: {str(e)[:300]}"
 
     finally:
         build_state["running"] = False
         build_state["current"] = None
 
-    # Send result back to Telegram
-    asyncio.run(send_message(app, chat_id, message))
+    await app.bot.send_message(chat_id=chat_id, text=message, parse_mode="Markdown")
 
-async def send_message(app, chat_id: int, text: str):
-    await app.bot.send_message(
-        chat_id=chat_id,
-        text=text,
-        parse_mode="Markdown"
-    )
 
 # ── /status command ───────────────────────────────────────
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
-        await update.message.reply_text(unauthorized_msg())
         return
 
     if build_state["running"]:
         await update.message.reply_text(
-            f"⚙️ *Build in progress...*\n\n"
-            f"📋 Building: _{build_state['current']}_\n\n"
+            f"*Build in progress...*\n"
+            f"PRD: _{build_state['current'][:60]}..._\n"
             f"Use /cancel to stop.",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
         )
     elif build_state["history"]:
         last = build_state["history"][-1]
         await update.message.reply_text(
-            f"✅ *Last build completed*\n\n"
-            f"📋 {last['requirement'][:60]}...\n"
-            f"📦 {last['url']}\n"
-            f"💰 {last['cost']}\n"
-            f"🕐 {last['date']}",
-            parse_mode="Markdown"
+            f"*Last build:*\n"
+            f"PRD: {last['prd']}...\n"
+            f"Repo: {last['url']}\n"
+            f"Cost: {last['cost']}",
+            parse_mode="Markdown",
         )
     else:
-        await update.message.reply_text(
-            "💤 No builds running or completed yet.\n"
-            "Use /build to start one."
-        )
+        await update.message.reply_text("No builds yet. Use /build to start.")
+
 
 # ── /repos command ────────────────────────────────────────
 async def repos_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
-        await update.message.reply_text(unauthorized_msg())
         return
-
-    await update.message.reply_text("🔍 Fetching your repos...")
-
     try:
         token = get_secret("agentscope/github-token")
         g = Github(token)
-        user = g.get_user()
-        repos = list(user.get_repos(sort="updated"))[:10]
-
-        if not repos:
-            await update.message.reply_text("No repos found.")
-            return
-
-        msg = "📦 *Your latest GitHub repos:*\n\n"
+        repos = list(g.get_user().get_repos(sort="updated"))[:10]
+        msg = "*Latest repos:*\n\n"
         for i, repo in enumerate(repos, 1):
-            visibility = "🔒" if repo.private else "🌐"
-            msg += f"{i}. {visibility} [{repo.name}]({repo.html_url})\n"
-
+            msg += f"{i}. [{repo.name}]({repo.html_url})\n"
         await update.message.reply_text(msg, parse_mode="Markdown")
-
     except Exception as e:
-        await update.message.reply_text(f"❌ Error fetching repos: {e}")
+        await update.message.reply_text(f"Error: {e}")
+
 
 # ── /cost command ─────────────────────────────────────────
 async def cost_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
-        await update.message.reply_text(unauthorized_msg())
         return
-
-    usage = gateway.summary()
-
-    history_cost = sum(
-        float(b["cost"].replace("$", ""))
-        for b in build_state["history"]
-    ) if build_state["history"] else 0
-
+    usage = cost_tracker.summary()
     msg = (
-        f"💰 *Cost Summary*\n\n"
-        f"Current session:\n"
-        f"  API calls: {usage['total_calls']}\n"
-        f"  Tokens: {usage['total_tokens']:,}\n"
-        f"  Cost: {usage['total_cost']}\n\n"
-        f"Total builds: {len(build_state['history'])}\n"
-        f"All-time cost: ${history_cost:.4f}"
+        f"*Cost Summary*\n\n"
+        f"API calls: {usage['total_calls']}\n"
+        f"Tokens: {usage['total_tokens']:,}\n"
+        f"Cost: {usage['total_cost']}\n"
+        f"Total builds: {len(build_state['history'])}"
     )
-
     await update.message.reply_text(msg, parse_mode="Markdown")
+
 
 # ── /cancel command ───────────────────────────────────────
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
-        await update.message.reply_text(unauthorized_msg())
         return
-
     if build_state["running"]:
         build_state["cancelled"] = True
-        await update.message.reply_text(
-            "🚫 Cancelling build...\n"
-            "The current file will finish then the build will stop."
-        )
+        await update.message.reply_text("Cancelling build...")
     else:
-        await update.message.reply_text("No build is currently running.")
+        await update.message.reply_text("No build running.")
+
 
 # ── Main ──────────────────────────────────────────────────
 def main():
+    agentscope.init(
+        project="agentscope-product-builder",
+        logging_path="./logs",
+        logging_level="INFO",
+    )
+
     print("Starting AgentScope Telegram Bot...")
     print(f"Authorized user ID: {ALLOWED_USER_ID}")
+    print("13 agents | 9-phase pipeline | AgentScope multi-agent system")
 
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    # Register handlers
-    app.add_handler(CommandHandler("start",  start))
-    app.add_handler(CommandHandler("help",   help_command))
-    app.add_handler(CommandHandler("build",  build_command))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("build", build_command))
     app.add_handler(CommandHandler("status", status_command))
-    app.add_handler(CommandHandler("repos",  repos_command))
-    app.add_handler(CommandHandler("cost",   cost_command))
+    app.add_handler(CommandHandler("repos", repos_command))
+    app.add_handler(CommandHandler("cost", cost_command))
     app.add_handler(CommandHandler("cancel", cancel_command))
-    app.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND,
-        handle_message
-    ))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     print("Bot is running. Send /start on Telegram.")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
+
 
 if __name__ == "__main__":
     main()
